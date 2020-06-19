@@ -124,16 +124,34 @@ class SNet(torch.nn.Module):
             x = self.layers[idx](x)
             totals += x
             if idx != num-1:
-                out = (totals >= torch.Tensor([0.01])).float() * .01
+                out = (totals >= torch.Tensor([0.1])).float() * .1
                 totals -= out
                 x = out
+                
+        return out
         
-        return totals
+    def get_output(self):
+        empty_in = torch.Tensor(np.zeros((1,14)))
+        out = self.forward(empty_in)
+        while sum(out[0]) > 0:
+            out = self.forward(empty_in)
+            
+        return self.totals[-1]
+        
     
     def reset(self):
         for i in range(len(self.totals)):
             self.totals[i] = torch.zeros((1,len(self.totals[i][0])), device=None)
 
+
+def process_input(state):
+    pre_state = state[0:6]*-1
+    pre_state[pre_state<0] = 0
+    state[state<0] = 0
+    new_state = np.concatenate((pre_state,state),axis=None)
+    new_state = [round(x,1) for x in new_state]
+    new_state = np.reshape(new_state, (1, 14))
+    return new_state
 
 
 def run_dqn(episode):
@@ -151,34 +169,24 @@ def run_dqn(episode):
     
     for e in range(episode):
         state = env.reset()
-        pre_state = state[0:6]*-1
-        pre_state[pre_state<0] = 0
-        state[state<0] = 0
-        state = np.concatenate((pre_state,state),axis=None)
-        state = [round(x,3) for x in state]
-        state = np.reshape(state, (1, 14))
+        state = process_input(state)
         score = 0
         max_steps = 3000
         for i in range(max_steps):
             action = [0,0,0,0]
             
             while state[state>0].size != 0:
-                out = agent(torch.Tensor(np.minimum(state, .01).tolist())).tolist()
-                state[state>0] -= .01
-                state[state<0.01] = 0
+                agent(torch.Tensor(np.minimum(state, .1).tolist()))
+                state[state>0] -= .1
+                state[state<0.1] = 0
 
-            action = np.argmax(out)
+            action = np.argmax(agent.get_output().tolist())
             agent.reset()
             env.render()
             
             next_state, reward, done, _ = env.step(action)
             score += reward
-            pre_state = next_state[0:6]*-1
-            pre_state[pre_state<0] = 0
-            next_state[next_state<0] = 0
-            next_state = np.concatenate((pre_state,next_state),axis=None)
-            next_state = [round(x,3) for x in next_state]
-            next_state = np.reshape(next_state, (1, 14))
+            next_state = process_input(next_state)
             state = next_state
             if done:
                 print("episode: {}/{}, score: {}".format(e, episode, score))
